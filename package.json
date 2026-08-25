@@ -1,21 +1,27 @@
 {
-  "name": "ohmrgb-fixer",
+  "name": "midi-message-filterer-and-device-proxy",
   "version": "1.0.0",
   "description": "MIDI Proxy to filter spammy CC messages",
-  "main": "backend/server.js",
+  "main": "backend/server.ts",
   "scripts": {
-    "dev:backend": "node backend/server.js",
+    "format": "prettier --write .",
+    "dev:backend": "deno run -A --unstable-detect-cjs backend/server.ts",
     "dev:frontend": "cd frontend && pnpm dev",
-    "dev": "concurrently \"pnpm run dev:backend\" \"pnpm run dev:frontend\""
+    "dev": "concurrently \"pnpm run dev:backend\" \"pnpm run dev:frontend\"",
+    "build": "pnpm run build:frontend",
+    "build:frontend": "cd frontend && pnpm run build",
+    "compile:mac-intel": "deno compile -A --unstable-detect-cjs --include frontend/dist --target x86_64-apple-darwin --output build/midi-fixer-mac-intel backend/server.ts",
+    "compile:mac-m1": "deno compile -A --unstable-detect-cjs --include frontend/dist --target aarch64-apple-darwin --output build/midi-fixer-mac-m1 backend/server.ts",
+    "compile:win": "deno compile -A --unstable-detect-cjs --include frontend/dist --target x86_64-pc-windows-msvc --output build/midi-fixer-windows backend/server.ts",
+    "compile:linux": "deno compile -A --unstable-detect-cjs --include frontend/dist --target x86_64-unknown-linux-gnu --output build/midi-fixer-linux backend/server.ts",
+    "compile": "pnpm run build && pnpm run compile:mac-intel && pnpm run compile:mac-m1 && pnpm run compile:win && pnpm run compile:linux",
+    "release": "pnpm run compile && zip -rj build/midi-fixer-mac-intel.zip build/midi-fixer-mac-intel && zip -rj build/midi-fixer-mac-m1.zip build/midi-fixer-mac-m1 && zip -rj build/midi-fixer-windows.zip build/midi-fixer-windows.exe && zip -rj build/midi-fixer-linux.zip build/midi-fixer-linux"
   },
   "dependencies": {
-    "@fastify/cors": "^11.3.0",
-    "cors": "^2.8.6",
-    "easymidi": "^3.2.0",
-    "fastify": "^5.10.0",
-    "socket.io": "^4.8.3"
+    "easymidi": "^3.2.0"
   },
   "devDependencies": {
-    "concurrently": "^10.0.3"
+    "concurrently": "^10.0.5",
+    "prettier": "^3.9.6"
   }
 }

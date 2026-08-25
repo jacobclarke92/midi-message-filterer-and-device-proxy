@@ -1,5 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
-import { io, Socket } from "socket.io-client";
+import React, { useEffect, useState, useRef } from 'react'
 import {
   Settings,
   Play,
@@ -8,161 +7,199 @@ import {
   Upload,
   Trash2,
   ShieldAlert,
-} from "lucide-react";
+} from 'lucide-react'
 
-const SOCKET_URL = "http://localhost:3001";
-const MAX_LOG_LINES = 250;
+const WS_URL = window.location.origin.includes('5173')
+  ? 'ws://localhost:33445'
+  : `ws://${window.location.host}`
+const MAX_LOG_LINES = 250
 
 interface MidiMessageLog {
-  time: number;
-  type: string;
-  msg: any;
-  isBlocked: boolean;
+  time: number
+  type: string
+  msg: any
+  isBlocked: boolean
 }
 
 interface BlockedCC {
-  cc: number;
-  channel: number | "all";
+  cc: number
+  channel: number | 'all'
 }
 
 interface AppState {
-  inputs: string[];
-  activeInput: string | null;
-  blockedCCs: BlockedCC[];
+  inputs: string[]
+  activeInput: string | null
+  blockedCCs: BlockedCC[]
 }
 
 function App() {
-  const [socket, setSocket] = useState<Socket | null>(null);
+  const [socket, setSocket] = useState<WebSocket | null>(null)
   const [state, setState] = useState<AppState>({
     inputs: [],
     activeInput: null,
     blockedCCs: [],
-  });
-  const [logs, setLogs] = useState<MidiMessageLog[]>([]);
-  const [isPaused, setIsPaused] = useState(false);
-  const [ccInput, setCcInput] = useState("");
-  const [channelInput, setChannelInput] = useState<number | "all">("all");
+  })
+  const [logs, setLogs] = useState<MidiMessageLog[]>([])
+  const [isPaused, setIsPaused] = useState(false)
+  const [ccInput, setCcInput] = useState('')
+  const [channelInput, setChannelInput] = useState<number | 'all'>('all')
 
-  const logsRef = useRef<MidiMessageLog[]>([]);
-  const isPausedRef = useRef(isPaused);
-
-  useEffect(() => {
-    isPausedRef.current = isPaused;
-  }, [isPaused]);
+  const logsRef = useRef<MidiMessageLog[]>([])
+  const isPausedRef = useRef(isPaused)
 
   useEffect(() => {
-    const newSocket = io(SOCKET_URL);
-    setSocket(newSocket);
+    isPausedRef.current = isPaused
+  }, [isPaused])
 
-    newSocket.on("state", (newState: AppState) => {
-      setState(newState);
-      localStorage.setItem(
-        "ohmProxySettings",
-        JSON.stringify({
-          activeInput: newState.activeInput,
-          blockedCCs: newState.blockedCCs,
-        }),
-      );
-    });
+  useEffect(() => {
+    const ws = new WebSocket(WS_URL)
+    setSocket(ws)
 
-    newSocket.on("midiMessage", (log: MidiMessageLog) => {
-      if (isPausedRef.current) return;
+    let loadTimeout: number
 
-      logsRef.current = [log, ...logsRef.current].slice(0, MAX_LOG_LINES);
-      setLogs([...logsRef.current]);
-    });
-
-    newSocket.on("connect", () => {
-      newSocket.emit("refreshPorts");
-      setTimeout(() => {
-        const saved = localStorage.getItem("ohmProxySettings");
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'refreshPorts' }))
+      loadTimeout = setTimeout(() => {
+        const saved = localStorage.getItem('ohmProxySettings')
         if (saved) {
           try {
-            const parsed = JSON.parse(saved);
+            const parsed = JSON.parse(saved)
             if (parsed.blockedCCs && parsed.blockedCCs.length > 0) {
-              // Map backward compatible structure
               const mappedCCs =
-                typeof parsed.blockedCCs[0] === "number"
+                typeof parsed.blockedCCs[0] === 'number'
                   ? parsed.blockedCCs.map((c: number) => ({
                       cc: c,
-                      channel: "all",
+                      channel: 'all',
                     }))
-                  : parsed.blockedCCs;
-              newSocket.emit("setBlockedCCs", mappedCCs);
+                  : parsed.blockedCCs
+              ws.send(
+                JSON.stringify({ type: 'setBlockedCCs', payload: mappedCCs }),
+              )
             }
             if (parsed.activeInput) {
-              newSocket.emit("selectInput", parsed.activeInput);
+              ws.send(
+                JSON.stringify({
+                  type: 'selectInput',
+                  payload: parsed.activeInput,
+                }),
+              )
             }
           } catch (e) {}
         }
-      }, 500);
-    });
+      }, 500)
+    }
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        if (data.type === 'state') {
+          const newState = data.payload
+          setState(newState)
+          localStorage.setItem(
+            'ohmProxySettings',
+            JSON.stringify({
+              activeInput: newState.activeInput,
+              blockedCCs: newState.blockedCCs,
+            }),
+          )
+        } else if (data.type === 'midiMessage') {
+          if (isPausedRef.current) return
+          logsRef.current = [data.payload, ...logsRef.current].slice(
+            0,
+            MAX_LOG_LINES,
+          )
+          setLogs([...logsRef.current])
+        }
+      } catch (err) {
+        console.error(err)
+      }
+    }
 
     return () => {
-      newSocket.close();
-    };
-  }, []);
+      clearTimeout(loadTimeout)
+      ws.close()
+    }
+  }, [])
 
   const handleAddCC = (e: React.FormEvent) => {
-    e.preventDefault();
-    const val = parseInt(ccInput, 10);
+    e.preventDefault()
+    const val = parseInt(ccInput, 10)
     if (!isNaN(val) && val >= 0 && val <= 127) {
       if (
         !state.blockedCCs.find(
           (rule) => rule.cc === val && rule.channel === channelInput,
         )
       ) {
-        socket?.emit("setBlockedCCs", [
-          ...state.blockedCCs,
-          { cc: val, channel: channelInput },
-        ]);
+        socket?.send(
+          JSON.stringify({
+            type: 'setBlockedCCs',
+            payload: [...state.blockedCCs, { cc: val, channel: channelInput }],
+          }),
+        )
       }
-      setCcInput("");
+      setCcInput('')
     }
-  };
+  }
 
   const handleRemoveCC = (ruleToRemove: BlockedCC) => {
-    socket?.emit(
-      "setBlockedCCs",
-      state.blockedCCs.filter(
-        (rule) =>
-          !(
-            rule.cc === ruleToRemove.cc && rule.channel === ruleToRemove.channel
-          ),
-      ),
-    );
-  };
+    socket?.send(
+      JSON.stringify({
+        type: 'setBlockedCCs',
+        payload: state.blockedCCs.filter(
+          (rule) =>
+            !(
+              rule.cc === ruleToRemove.cc &&
+              rule.channel === ruleToRemove.channel
+            ),
+        ),
+      }),
+    )
+  }
 
   const handleSelectInput = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    socket?.emit("selectInput", e.target.value);
-  };
+    socket?.send(
+      JSON.stringify({ type: 'selectInput', payload: e.target.value }),
+    )
+  }
 
   const triggerExport = () => {
     const dataStr =
-      "data:text/json;charset=utf-8," +
-      encodeURIComponent(JSON.stringify(state));
-    const dlAnchorElem = document.createElement("a");
-    dlAnchorElem.setAttribute("href", dataStr);
-    dlAnchorElem.setAttribute("download", "ohm-proxy-settings.json");
-    dlAnchorElem.click();
-  };
+      'data:text/json;charset=utf-8,' +
+      encodeURIComponent(JSON.stringify(state))
+    const dlAnchorElem = document.createElement('a')
+    dlAnchorElem.setAttribute('href', dataStr)
+    dlAnchorElem.setAttribute('download', 'ohm-proxy-settings.json')
+    dlAnchorElem.click()
+  }
 
   const triggerImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
     reader.onload = (event) => {
       try {
-        const parsed = JSON.parse(event.target?.result as string);
-        if (parsed.blockedCCs) socket?.emit("setBlockedCCs", parsed.blockedCCs);
-        if (parsed.activeInput) socket?.emit("selectInput", parsed.activeInput);
+        const parsed = JSON.parse(event.target?.result as string)
+        if (parsed.blockedCCs)
+          socket?.send(
+            JSON.stringify({
+              type: 'setBlockedCCs',
+              payload: parsed.blockedCCs,
+            }),
+          )
+        if (parsed.activeInput)
+          socket?.send(
+            JSON.stringify({
+              type: 'selectInput',
+              payload: parsed.activeInput,
+            }),
+          )
       } catch (err) {
-        alert("Invalid JSON file");
+        alert('Invalid JSON file')
       }
-    };
-    reader.readAsText(file);
-    e.target.value = "";
-  };
+    }
+    reader.readAsText(file)
+    e.target.value = ''
+  }
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 p-8 font-sans">
@@ -205,7 +242,7 @@ function App() {
                     Input Device
                   </label>
                   <select
-                    value={state.activeInput || ""}
+                    value={state.activeInput || ''}
                     onChange={handleSelectInput}
                     className="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
                   >
@@ -250,8 +287,8 @@ function App() {
                   value={channelInput}
                   onChange={(e) =>
                     setChannelInput(
-                      e.target.value === "all"
-                        ? "all"
+                      e.target.value === 'all'
+                        ? 'all'
                         : parseInt(e.target.value, 10),
                     )
                   }
@@ -285,7 +322,7 @@ function App() {
                       CC <strong className="text-orange-400">#{rule.cc}</strong>
                     </span>
                     <span className="text-gray-500 text-xs">
-                      (Ch: {rule.channel === "all" ? "All" : rule.channel + 1})
+                      (Ch: {rule.channel === 'all' ? 'All' : rule.channel + 1})
                     </span>
                     <button
                       onClick={() => handleRemoveCC(rule)}
@@ -307,17 +344,17 @@ function App() {
                   onClick={() => setIsPaused(!isPaused)}
                   className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
                     isPaused
-                      ? "bg-indigo-500 hover:bg-indigo-600 text-white"
-                      : "bg-gray-700 hover:bg-gray-600 text-gray-300"
+                      ? 'bg-indigo-500 hover:bg-indigo-600 text-white'
+                      : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
                   }`}
                 >
                   {isPaused ? <Play size={16} /> : <Pause size={16} />}
-                  {isPaused ? "Resume" : "Pause"}
+                  {isPaused ? 'Resume' : 'Pause'}
                 </button>
                 <button
                   onClick={() => {
-                    setLogs([]);
-                    logsRef.current = [];
+                    setLogs([])
+                    logsRef.current = []
                   }}
                   className="text-gray-400 hover:text-gray-200 text-sm px-2"
                 >
@@ -336,12 +373,12 @@ function App() {
                   {logs.map((L, i) => (
                     <div
                       key={L.time + i.toString()}
-                      className={`flex items-center gap-4 py-1 border-b border-gray-700/50 ${L.isBlocked ? "text-red-400" : "text-gray-300"}`}
+                      className={`flex items-center gap-4 py-1 border-b border-gray-700/50 ${L.isBlocked ? 'text-red-400' : 'text-gray-300'}`}
                     >
                       <span className="text-gray-500 w-24 shrink-0">
                         {new Date(L.time)
                           .toISOString()
-                          .split("T")[1]
+                          .split('T')[1]
                           .slice(0, -1)}
                       </span>
                       <span className="w-20 shrink-0 font-semibold">
@@ -364,7 +401,7 @@ function App() {
         </div>
       </div>
     </div>
-  );
+  )
 }
 
-export default App;
+export default App
