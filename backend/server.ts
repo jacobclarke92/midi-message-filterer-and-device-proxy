@@ -19,6 +19,8 @@ type MidiEventType =
   | 'stop'
   | 'activesense'
   | 'reset'
+  | 'mtc'
+  | 'sysex'
 
 interface BlockedCC {
   cc: number
@@ -78,6 +80,8 @@ function setupMidiInput(portName: string | null) {
       'stop',
       'activesense',
       'reset',
+      'mtc',
+      'sysex',
     ]
 
     messageTypes.forEach((type) => {

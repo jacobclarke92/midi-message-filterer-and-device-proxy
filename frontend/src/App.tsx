@@ -7,6 +7,7 @@ import {
   Upload,
   Trash2,
   ShieldAlert,
+  Filter,
 } from 'lucide-react'
 
 const WS_URL = window.location.origin.includes('5173')
@@ -32,6 +33,41 @@ interface AppState {
   blockedCCs: BlockedCC[]
 }
 
+type FilterKey =
+  | 'note'
+  | 'polyAftertouch'
+  | 'control'
+  | 'program'
+  | 'channelPressure'
+  | 'pitchWheel'
+  | 'timeCode'
+  | 'songPosition'
+  | 'songSelect'
+  | 'tuneRequest'
+  | 'clock'
+  | 'startStop'
+  | 'activeSense'
+  | 'reset'
+  | 'sysex'
+
+const defaultFilters: Record<FilterKey, boolean> = {
+  note: true,
+  polyAftertouch: true,
+  control: true,
+  program: true,
+  channelPressure: true,
+  pitchWheel: true,
+  timeCode: true,
+  songPosition: true,
+  songSelect: true,
+  tuneRequest: true,
+  clock: false,
+  startStop: true,
+  activeSense: false,
+  reset: true,
+  sysex: true,
+}
+
 function App() {
   const [socket, setSocket] = useState<WebSocket | null>(null)
   const [state, setState] = useState<AppState>({
@@ -43,13 +79,29 @@ function App() {
   const [isPaused, setIsPaused] = useState(false)
   const [ccInput, setCcInput] = useState('')
   const [channelInput, setChannelInput] = useState<number | 'all'>('all')
+  const [logFilters, setLogFilters] =
+    useState<Record<FilterKey, boolean>>(defaultFilters)
+  const [showFilters, setShowFilters] = useState(false)
 
   const logsRef = useRef<MidiMessageLog[]>([])
   const isPausedRef = useRef(isPaused)
+  const logFiltersRef = useRef(logFilters)
 
   useEffect(() => {
     isPausedRef.current = isPaused
   }, [isPaused])
+
+  useEffect(() => {
+    logFiltersRef.current = logFilters
+    localStorage.setItem(
+      'ohmProxySettings',
+      JSON.stringify({
+        activeInput: state.activeInput,
+        blockedCCs: state.blockedCCs,
+        logFilters: logFilters,
+      }),
+    )
+  }, [logFilters, state.activeInput, state.blockedCCs])
 
   useEffect(() => {
     const ws = new WebSocket(WS_URL)
@@ -84,6 +136,7 @@ function App() {
                 }),
               )
             }
+            if (parsed.logFilters) setLogFilters(parsed.logFilters)
           } catch (e) {}
         }
       }, 500)
@@ -95,15 +148,60 @@ function App() {
         if (data.type === 'state') {
           const newState = data.payload
           setState(newState)
-          localStorage.setItem(
-            'ohmProxySettings',
-            JSON.stringify({
-              activeInput: newState.activeInput,
-              blockedCCs: newState.blockedCCs,
-            }),
-          )
         } else if (data.type === 'midiMessage') {
           if (isPausedRef.current) return
+
+          const f = logFiltersRef.current
+          let show = true
+          switch (data.payload.type) {
+            case 'noteon':
+            case 'noteoff':
+              show = f.note
+              break
+            case 'poly aftertouch':
+              show = f.polyAftertouch
+              break
+            case 'cc':
+              show = f.control
+              break
+            case 'program':
+              show = f.program
+              break
+            case 'channel aftertouch':
+              show = f.channelPressure
+              break
+            case 'pitch':
+              show = f.pitchWheel
+              break
+            case 'mtc':
+              show = f.timeCode
+              break
+            case 'position':
+              show = f.songPosition
+              break
+            case 'select':
+              show = f.songSelect
+              break
+            case 'clock':
+              show = f.clock
+              break
+            case 'start':
+            case 'continue':
+            case 'stop':
+              show = f.startStop
+              break
+            case 'activesense':
+              show = f.activeSense
+              break
+            case 'reset':
+              show = f.reset
+              break
+            case 'sysex':
+              show = f.sysex
+              break
+          }
+          if (!show) return
+
           logsRef.current = [data.payload, ...logsRef.current].slice(
             0,
             MAX_LOG_LINES,
@@ -165,7 +263,13 @@ function App() {
   const triggerExport = () => {
     const dataStr =
       'data:text/json;charset=utf-8,' +
-      encodeURIComponent(JSON.stringify(state))
+      encodeURIComponent(
+        JSON.stringify({
+          activeInput: state.activeInput,
+          blockedCCs: state.blockedCCs,
+          logFilters: logFilters,
+        }),
+      )
     const dlAnchorElem = document.createElement('a')
     dlAnchorElem.setAttribute('href', dataStr)
     dlAnchorElem.setAttribute('download', 'ohm-proxy-settings.json')
@@ -193,6 +297,7 @@ function App() {
               payload: parsed.activeInput,
             }),
           )
+        if (parsed.logFilters) setLogFilters(parsed.logFilters)
       } catch (err) {
         alert('Invalid JSON file')
       }
@@ -341,6 +446,16 @@ function App() {
               <h2 className="font-semibold text-gray-300">MIDI Activity Log</h2>
               <div className="flex gap-3 items-center">
                 <button
+                  onClick={() => setShowFilters(!showFilters)}
+                  className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                    showFilters
+                      ? 'bg-indigo-500 hover:bg-indigo-600 text-white'
+                      : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                  }`}
+                >
+                  <Filter size={16} /> Filters
+                </button>
+                <button
                   onClick={() => setIsPaused(!isPaused)}
                   className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
                     isPaused
@@ -362,6 +477,243 @@ function App() {
                 </button>
               </div>
             </div>
+
+            {showFilters && (
+              <div className="p-4 border-b border-gray-700 bg-gray-800/80">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-indigo-400 mb-2">
+                      Voice Messages
+                    </h3>
+                    <label className="flex items-center gap-2 text-xs text-gray-300 mb-1 cursor-pointer hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={logFilters.note}
+                        onChange={(e) =>
+                          setLogFilters({
+                            ...logFilters,
+                            note: e.target.checked,
+                          })
+                        }
+                        className="rounded bg-gray-900 border-gray-700"
+                      />
+                      Note On/Off
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-gray-300 mb-1 cursor-pointer hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={logFilters.polyAftertouch}
+                        onChange={(e) =>
+                          setLogFilters({
+                            ...logFilters,
+                            polyAftertouch: e.target.checked,
+                          })
+                        }
+                        className="rounded bg-gray-900 border-gray-700"
+                      />
+                      Aftertouch (Poly)
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-gray-300 mb-1 cursor-pointer hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={logFilters.control}
+                        onChange={(e) =>
+                          setLogFilters({
+                            ...logFilters,
+                            control: e.target.checked,
+                          })
+                        }
+                        className="rounded bg-gray-900 border-gray-700"
+                      />
+                      Control
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-gray-300 mb-1 cursor-pointer hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={logFilters.program}
+                        onChange={(e) =>
+                          setLogFilters({
+                            ...logFilters,
+                            program: e.target.checked,
+                          })
+                        }
+                        className="rounded bg-gray-900 border-gray-700"
+                      />
+                      Program
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-gray-300 mb-1 cursor-pointer hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={logFilters.channelPressure}
+                        onChange={(e) =>
+                          setLogFilters({
+                            ...logFilters,
+                            channelPressure: e.target.checked,
+                          })
+                        }
+                        className="rounded bg-gray-900 border-gray-700"
+                      />
+                      Channel Pressure
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-gray-300 mb-1 cursor-pointer hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={logFilters.pitchWheel}
+                        onChange={(e) =>
+                          setLogFilters({
+                            ...logFilters,
+                            pitchWheel: e.target.checked,
+                          })
+                        }
+                        className="rounded bg-gray-900 border-gray-700"
+                      />
+                      Pitch Wheel
+                    </label>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-indigo-400 mb-2">
+                      System Common
+                    </h3>
+                    <label className="flex items-center gap-2 text-xs text-gray-300 mb-1 cursor-pointer hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={logFilters.timeCode}
+                        onChange={(e) =>
+                          setLogFilters({
+                            ...logFilters,
+                            timeCode: e.target.checked,
+                          })
+                        }
+                        className="rounded bg-gray-900 border-gray-700"
+                      />
+                      Time Code
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-gray-300 mb-1 cursor-pointer hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={logFilters.songPosition}
+                        onChange={(e) =>
+                          setLogFilters({
+                            ...logFilters,
+                            songPosition: e.target.checked,
+                          })
+                        }
+                        className="rounded bg-gray-900 border-gray-700"
+                      />
+                      Song Position Pointer
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-gray-300 mb-1 cursor-pointer hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={logFilters.songSelect}
+                        onChange={(e) =>
+                          setLogFilters({
+                            ...logFilters,
+                            songSelect: e.target.checked,
+                          })
+                        }
+                        className="rounded bg-gray-900 border-gray-700"
+                      />
+                      Song Select
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-gray-300 mb-1 cursor-pointer hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={logFilters.tuneRequest}
+                        onChange={(e) =>
+                          setLogFilters({
+                            ...logFilters,
+                            tuneRequest: e.target.checked,
+                          })
+                        }
+                        className="rounded bg-gray-900 border-gray-700"
+                      />
+                      Tune Request
+                    </label>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-indigo-400 mb-2">
+                      Real Time
+                    </h3>
+                    <label className="flex items-center gap-2 text-xs text-gray-300 mb-1 cursor-pointer hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={logFilters.clock}
+                        onChange={(e) =>
+                          setLogFilters({
+                            ...logFilters,
+                            clock: e.target.checked,
+                          })
+                        }
+                        className="rounded bg-gray-900 border-gray-700"
+                      />
+                      Clock
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-gray-300 mb-1 cursor-pointer hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={logFilters.startStop}
+                        onChange={(e) =>
+                          setLogFilters({
+                            ...logFilters,
+                            startStop: e.target.checked,
+                          })
+                        }
+                        className="rounded bg-gray-900 border-gray-700"
+                      />
+                      Start/Stop/Continue
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-gray-300 mb-1 cursor-pointer hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={logFilters.activeSense}
+                        onChange={(e) =>
+                          setLogFilters({
+                            ...logFilters,
+                            activeSense: e.target.checked,
+                          })
+                        }
+                        className="rounded bg-gray-900 border-gray-700"
+                      />
+                      Active Sense
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-gray-300 mb-1 cursor-pointer hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={logFilters.reset}
+                        onChange={(e) =>
+                          setLogFilters({
+                            ...logFilters,
+                            reset: e.target.checked,
+                          })
+                        }
+                        className="rounded bg-gray-900 border-gray-700"
+                      />
+                      Reset
+                    </label>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-indigo-400 mb-2">
+                      System Excl
+                    </h3>
+                    <label className="flex items-center gap-2 text-xs text-gray-300 mb-1 cursor-pointer hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={logFilters.sysex}
+                        onChange={(e) =>
+                          setLogFilters({
+                            ...logFilters,
+                            sysex: e.target.checked,
+                          })
+                        }
+                        className="rounded bg-gray-900 border-gray-700"
+                      />
+                      System Exclusive
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="flex-1 overflow-auto p-4 font-mono text-xs">
               {logs.length === 0 ? (
