@@ -177,8 +177,11 @@ Deno.serve({ port: PORT }, (req) => {
     return Response.json({ status: 'running', activeInput: activeInputName })
   }
 
+  let distPath = 'frontend/dist'
+  if (import.meta.dirname) distPath = `${import.meta.dirname}/../frontend/dist`
+
   return serveDir(req, {
-    fsRoot: 'frontend/dist',
+    fsRoot: distPath,
     urlRoot: '',
     showDirListing: false,
     enableCors: true,
